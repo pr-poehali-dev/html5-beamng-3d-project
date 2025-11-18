@@ -40,6 +40,9 @@ export default function Index() {
   const [showSettings, setShowSettings] = useState(false);
   const [gravity, setGravity] = useState([9.8]);
   const [enginePower, setEnginePower] = useState([100]);
+  const [cameraDistance, setCameraDistance] = useState(25);
+  const [cameraHeight, setCameraHeight] = useState(12);
+  const [cameraAngleOffset, setCameraAngleOffset] = useState(0);
   const keysPressed = useRef<Set<string>>(new Set());
   const animationFrameRef = useRef<number>();
 
@@ -55,21 +58,24 @@ export default function Index() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      keysPressed.current.add(e.key.toLowerCase());
-      e.preventDefault();
+      const key = e.key.toLowerCase();
+      keysPressed.current.add(key);
+      
+      if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'q', 'e', 'r', 'f'].includes(key)) {
+        e.preventDefault();
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       keysPressed.current.delete(e.key.toLowerCase());
-      e.preventDefault();
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
 
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
     };
   }, []);
 
@@ -95,21 +101,23 @@ export default function Index() {
       );
     };
 
-    const project3D = (x: number, y: number, z: number, camX: number, camZ: number, camAngle: number) => {
+    const project3D = (x: number, y: number, z: number, camX: number, camZ: number, camAngle: number, camHeight: number) => {
       const dx = x - camX;
       const dz = z - camZ;
+      const dy = y - camHeight;
       
       const rotatedX = dx * Math.cos(camAngle) - dz * Math.sin(camAngle);
       const rotatedZ = dx * Math.sin(camAngle) + dz * Math.cos(camAngle);
       
-      const perspective = 300 / (rotatedZ + 300);
-      const screenX = canvas.width / 2 + rotatedX * perspective * 15;
-      const screenY = canvas.height * 0.7 - y * perspective * 15;
+      const distance = Math.max(5, rotatedZ + 300);
+      const perspective = 400 / distance;
+      const screenX = canvas.width / 2 + rotatedX * perspective * 20;
+      const screenY = canvas.height * 0.65 - dy * perspective * 20;
       
-      return { screenX, screenY, perspective };
+      return { screenX, screenY, perspective, distance: rotatedZ };
     };
 
-    const drawBox3D = (pos: Vector3, size: Vector3, color: string, camX: number, camZ: number, camAngle: number) => {
+    const drawBox3D = (pos: Vector3, size: Vector3, color: string, camX: number, camZ: number, camAngle: number, camHeight: number) => {
       const vertices = [
         { x: pos.x - size.x/2, y: pos.y, z: pos.z - size.z/2 },
         { x: pos.x + size.x/2, y: pos.y, z: pos.z - size.z/2 },
@@ -121,7 +129,7 @@ export default function Index() {
         { x: pos.x - size.x/2, y: pos.y + size.y, z: pos.z + size.z/2 },
       ];
 
-      const projected = vertices.map(v => project3D(v.x, v.y, v.z, camX, camZ, camAngle));
+      const projected = vertices.map(v => project3D(v.x, v.y, v.z, camX, camZ, camAngle, camHeight));
 
       const faces = [
         [0, 1, 2, 3],
@@ -142,17 +150,19 @@ export default function Index() {
       ];
 
       faces.forEach((face, idx) => {
-        ctx.fillStyle = faceColors[idx];
-        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(projected[face[0]].screenX, projected[face[0]].screenY);
-        for (let i = 1; i < face.length; i++) {
-          ctx.lineTo(projected[face[i]].screenX, projected[face[i]].screenY);
+        if (projected.every(p => p.distance > -100)) {
+          ctx.fillStyle = faceColors[idx];
+          ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(projected[face[0]].screenX, projected[face[0]].screenY);
+          for (let i = 1; i < face.length; i++) {
+            ctx.lineTo(projected[face[i]].screenX, projected[face[i]].screenY);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
         }
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
       });
     };
 
@@ -171,18 +181,37 @@ export default function Index() {
         const powerFactor = enginePower[0] / 100;
 
         if (keysPressed.current.has('w') || keysPressed.current.has('arrowup')) {
-          vehicle.velocity.x -= Math.sin(vehicle.rotation) * 0.5 * powerFactor;
-          vehicle.velocity.z -= Math.cos(vehicle.rotation) * 0.5 * powerFactor;
+          vehicle.velocity.x -= Math.sin(vehicle.rotation) * 1.2 * powerFactor;
+          vehicle.velocity.z -= Math.cos(vehicle.rotation) * 1.2 * powerFactor;
         }
         if (keysPressed.current.has('s') || keysPressed.current.has('arrowdown')) {
-          vehicle.velocity.x += Math.sin(vehicle.rotation) * 0.3 * powerFactor;
-          vehicle.velocity.z += Math.cos(vehicle.rotation) * 0.3 * powerFactor;
+          vehicle.velocity.x += Math.sin(vehicle.rotation) * 0.7 * powerFactor;
+          vehicle.velocity.z += Math.cos(vehicle.rotation) * 0.7 * powerFactor;
         }
         if (keysPressed.current.has('a') || keysPressed.current.has('arrowleft')) {
-          vehicle.rotation += 0.05;
+          const speedFactor = Math.sqrt(vehicle.velocity.x ** 2 + vehicle.velocity.z ** 2);
+          if (speedFactor > 0.1) {
+            vehicle.rotation += 0.04;
+          }
         }
         if (keysPressed.current.has('d') || keysPressed.current.has('arrowright')) {
-          vehicle.rotation -= 0.05;
+          const speedFactor = Math.sqrt(vehicle.velocity.x ** 2 + vehicle.velocity.z ** 2);
+          if (speedFactor > 0.1) {
+            vehicle.rotation -= 0.04;
+          }
+        }
+
+        if (keysPressed.current.has('q')) {
+          setCameraAngleOffset(prev => prev + 0.03);
+        }
+        if (keysPressed.current.has('e')) {
+          setCameraAngleOffset(prev => prev - 0.03);
+        }
+        if (keysPressed.current.has('r')) {
+          setCameraDistance(prev => Math.max(10, prev - 0.5));
+        }
+        if (keysPressed.current.has('f')) {
+          setCameraDistance(prev => Math.min(50, prev + 0.5));
         }
 
         vehicle.velocity.x *= 0.98;
@@ -232,9 +261,9 @@ export default function Index() {
       }
 
       const vehicle = vehicleRef.current;
-      const camX = vehicle.position.x + Math.sin(vehicle.rotation) * 15;
-      const camZ = vehicle.position.z + Math.cos(vehicle.rotation) * 15;
-      const camAngle = vehicle.rotation;
+      const totalAngle = vehicle.rotation + cameraAngleOffset;
+      const camX = vehicle.position.x + Math.sin(totalAngle) * cameraDistance;
+      const camZ = vehicle.position.z + Math.cos(totalAngle) * cameraDistance;
 
       const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
       gradient.addColorStop(0, '#0A1128');
@@ -245,12 +274,12 @@ export default function Index() {
       ctx.fillStyle = '#1e3a5f';
       for (let z = -50; z <= 50; z += 5) {
         for (let x = -50; x <= 50; x += 5) {
-          const p1 = project3D(x, 0, z, camX, camZ, camAngle);
-          const p2 = project3D(x + 5, 0, z, camX, camZ, camAngle);
-          const p3 = project3D(x + 5, 0, z + 5, camX, camZ, camAngle);
-          const p4 = project3D(x, 0, z + 5, camX, camZ, camAngle);
+          const p1 = project3D(x, 0, z, camX, camZ, totalAngle, cameraHeight);
+          const p2 = project3D(x + 5, 0, z, camX, camZ, totalAngle, cameraHeight);
+          const p3 = project3D(x + 5, 0, z + 5, camX, camZ, totalAngle, cameraHeight);
+          const p4 = project3D(x, 0, z + 5, camX, camZ, totalAngle, cameraHeight);
           
-          if (p1.perspective > 0 && p2.perspective > 0) {
+          if (p1.distance > 0 && p2.distance > 0) {
             ctx.globalAlpha = 0.3;
             ctx.strokeStyle = '#0EA5E9';
             ctx.lineWidth = 1;
@@ -267,11 +296,11 @@ export default function Index() {
       }
 
       obstacles.forEach((obstacle) => {
-        drawBox3D(obstacle.position, obstacle.size, obstacle.color, camX, camZ, camAngle);
+        drawBox3D(obstacle.position, obstacle.size, obstacle.color, camX, camZ, totalAngle, cameraHeight);
       });
 
       const damageColor = vehicle.damage > 50 ? '#EF4444' : '#0EA5E9';
-      drawBox3D(vehicle.position, { x: 2, y: 1.5, z: 4 }, damageColor, camX, camZ, camAngle);
+      drawBox3D(vehicle.position, { x: 2, y: 1.5, z: 4 }, damageColor, camX, camZ, totalAngle, cameraHeight);
 
       animationFrameRef.current = requestAnimationFrame(gameLoop);
     };
@@ -284,7 +313,7 @@ export default function Index() {
       }
       window.removeEventListener('resize', resizeCanvas);
     };
-  }, [isPaused, gravity, enginePower]);
+  }, [isPaused, gravity, enginePower, cameraDistance, cameraHeight, cameraAngleOffset]);
 
   const resetVehicle = () => {
     vehicleRef.current = {
@@ -296,6 +325,9 @@ export default function Index() {
     };
     setSpeed(0);
     setDamage(0);
+    setCameraDistance(25);
+    setCameraHeight(12);
+    setCameraAngleOffset(0);
   };
 
   return (
@@ -303,9 +335,10 @@ export default function Index() {
       <canvas
         ref={canvasRef}
         className="w-full h-full"
+        tabIndex={0}
       />
 
-      <div className="absolute top-6 left-6 space-y-4">
+      <div className="absolute top-6 left-6 space-y-4 pointer-events-auto">
         <Card className="bg-black/70 backdrop-blur-md border-[#0EA5E9]/40 p-4 min-w-[200px]">
           <div className="space-y-2 text-white">
             <div className="flex justify-between items-center">
@@ -323,7 +356,7 @@ export default function Index() {
 
         <Card className="bg-black/70 backdrop-blur-md border-[#0EA5E9]/40 p-3">
           <div className="text-white text-sm space-y-1">
-            <div className="text-gray-400 mb-2 font-semibold">УПРАВЛЕНИЕ</div>
+            <div className="text-gray-400 mb-2 font-semibold">МАШИНА</div>
             <div className="flex items-center gap-2">
               <span className="text-[#0EA5E9]">W/↑</span> <span className="text-gray-300">Газ</span>
             </div>
@@ -338,9 +371,21 @@ export default function Index() {
             </div>
           </div>
         </Card>
+
+        <Card className="bg-black/70 backdrop-blur-md border-[#F97316]/40 p-3">
+          <div className="text-white text-sm space-y-1">
+            <div className="text-gray-400 mb-2 font-semibold">КАМЕРА</div>
+            <div className="flex items-center gap-2">
+              <span className="text-[#F97316]">Q/E</span> <span className="text-gray-300">Вращать</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[#F97316]">R/F</span> <span className="text-gray-300">Зум</span>
+            </div>
+          </div>
+        </Card>
       </div>
 
-      <div className="absolute top-6 right-6 space-y-3">
+      <div className="absolute top-6 right-6 space-y-3 pointer-events-auto">
         <Button
           onClick={() => setIsPaused(!isPaused)}
           className="w-full bg-[#0EA5E9] hover:bg-[#0EA5E9]/80 text-white shadow-lg"
@@ -368,7 +413,7 @@ export default function Index() {
       </div>
 
       {showSettings && (
-        <Card className="absolute bottom-6 right-6 bg-black/80 backdrop-blur-md border-[#0EA5E9]/40 p-6 w-80 shadow-2xl">
+        <Card className="absolute bottom-6 right-6 bg-black/80 backdrop-blur-md border-[#0EA5E9]/40 p-6 w-80 shadow-2xl pointer-events-auto">
           <div className="space-y-5 text-white">
             <div>
               <div className="flex justify-between mb-2">
@@ -399,14 +444,44 @@ export default function Index() {
                 className="w-full"
               />
             </div>
+
+            <div className="pt-2 border-t border-white/10">
+              <div className="flex justify-between mb-2">
+                <span className="text-sm font-medium">Расстояние камеры</span>
+                <span className="text-sm text-[#F97316] font-mono">{cameraDistance.toFixed(0)}м</span>
+              </div>
+              <Slider
+                value={[cameraDistance]}
+                onValueChange={(val) => setCameraDistance(val[0])}
+                min={10}
+                max={50}
+                step={1}
+                className="w-full"
+              />
+            </div>
+
+            <div>
+              <div className="flex justify-between mb-2">
+                <span className="text-sm font-medium">Высота камеры</span>
+                <span className="text-sm text-[#F97316] font-mono">{cameraHeight.toFixed(0)}м</span>
+              </div>
+              <Slider
+                value={[cameraHeight]}
+                onValueChange={(val) => setCameraHeight(val[0])}
+                min={5}
+                max={30}
+                step={1}
+                className="w-full"
+              />
+            </div>
           </div>
         </Card>
       )}
 
-      <div className="absolute bottom-6 left-6">
+      <div className="absolute bottom-6 left-6 pointer-events-auto">
         <Card className="bg-black/70 backdrop-blur-md border-[#0EA5E9]/40 p-4 shadow-xl">
           <h1 className="text-2xl font-bold text-white mb-1 tracking-wider">BEAMNG SIMULATOR</h1>
-          <p className="text-sm text-gray-400">Краш-тест драйв v2.0</p>
+          <p className="text-sm text-gray-400">Краш-тест драйв v3.0</p>
         </Card>
       </div>
     </div>
