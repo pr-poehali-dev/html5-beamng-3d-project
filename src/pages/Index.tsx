@@ -22,11 +22,12 @@ interface Obstacle {
   position: Vector3;
   size: Vector3;
   type: 'wall' | 'ramp' | 'barrier';
+  color: string;
 }
 
 export default function Index() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [vehicle, setVehicle] = useState<Vehicle>({
+  const vehicleRef = useRef<Vehicle>({
     position: { x: 0, y: 1, z: 0 },
     velocity: { x: 0, y: 0, z: 0 },
     rotation: 0,
@@ -34,29 +35,33 @@ export default function Index() {
     damage: 0,
   });
   const [speed, setSpeed] = useState(0);
+  const [damage, setDamage] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [gravity, setGravity] = useState([9.8]);
   const [enginePower, setEnginePower] = useState([100]);
   const keysPressed = useRef<Set<string>>(new Set());
   const animationFrameRef = useRef<number>();
-  const cameraAngle = useRef(0);
 
   const obstacles: Obstacle[] = [
-    { position: { x: 30, y: 0, z: 0 }, size: { x: 2, y: 5, z: 20 }, type: 'wall' },
-    { position: { x: -30, y: 0, z: 0 }, size: { x: 2, y: 5, z: 20 }, type: 'wall' },
-    { position: { x: 0, y: 0, z: -30 }, size: { x: 20, y: 5, z: 2 }, type: 'wall' },
-    { position: { x: 10, y: 0, z: 10 }, size: { x: 4, y: 3, z: 4 }, type: 'barrier' },
-    { position: { x: -15, y: 0, z: 5 }, size: { x: 8, y: 2, z: 6 }, type: 'ramp' },
+    { position: { x: 30, y: 0, z: 0 }, size: { x: 2, y: 5, z: 40 }, type: 'wall', color: '#8B5CF6' },
+    { position: { x: -30, y: 0, z: 0 }, size: { x: 2, y: 5, z: 40 }, type: 'wall', color: '#8B5CF6' },
+    { position: { x: 0, y: 0, z: -40 }, size: { x: 40, y: 5, z: 2 }, type: 'wall', color: '#8B5CF6' },
+    { position: { x: 0, y: 0, z: 40 }, size: { x: 40, y: 5, z: 2 }, type: 'wall', color: '#8B5CF6' },
+    { position: { x: 10, y: 0, z: 10 }, size: { x: 4, y: 3, z: 4 }, type: 'barrier', color: '#EF4444' },
+    { position: { x: -15, y: 0, z: 5 }, size: { x: 8, y: 1.5, z: 6 }, type: 'ramp', color: '#F97316' },
+    { position: { x: -10, y: 0, z: -10 }, size: { x: 3, y: 4, z: 3 }, type: 'barrier', color: '#10B981' },
   ];
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       keysPressed.current.add(e.key.toLowerCase());
+      e.preventDefault();
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       keysPressed.current.delete(e.key.toLowerCase());
+      e.preventDefault();
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -86,151 +91,187 @@ export default function Index() {
       return (
         Math.abs(pos.x - obstacle.position.x) < (size.x + obstacle.size.x) / 2 &&
         Math.abs(pos.z - obstacle.position.z) < (size.z + obstacle.size.z) / 2 &&
-        pos.y < obstacle.size.y
+        pos.y <= obstacle.size.y
       );
     };
 
-    const gameLoop = () => {
-      if (isPaused) {
-        animationFrameRef.current = requestAnimationFrame(gameLoop);
-        return;
-      }
+    const project3D = (x: number, y: number, z: number, camX: number, camZ: number, camAngle: number) => {
+      const dx = x - camX;
+      const dz = z - camZ;
+      
+      const rotatedX = dx * Math.cos(camAngle) - dz * Math.sin(camAngle);
+      const rotatedZ = dx * Math.sin(camAngle) + dz * Math.cos(camAngle);
+      
+      const perspective = 300 / (rotatedZ + 300);
+      const screenX = canvas.width / 2 + rotatedX * perspective * 15;
+      const screenY = canvas.height * 0.7 - y * perspective * 15;
+      
+      return { screenX, screenY, perspective };
+    };
 
-      setVehicle((prev) => {
-        const newVehicle = { ...prev };
+    const drawBox3D = (pos: Vector3, size: Vector3, color: string, camX: number, camZ: number, camAngle: number) => {
+      const vertices = [
+        { x: pos.x - size.x/2, y: pos.y, z: pos.z - size.z/2 },
+        { x: pos.x + size.x/2, y: pos.y, z: pos.z - size.z/2 },
+        { x: pos.x + size.x/2, y: pos.y, z: pos.z + size.z/2 },
+        { x: pos.x - size.x/2, y: pos.y, z: pos.z + size.z/2 },
+        { x: pos.x - size.x/2, y: pos.y + size.y, z: pos.z - size.z/2 },
+        { x: pos.x + size.x/2, y: pos.y + size.y, z: pos.z - size.z/2 },
+        { x: pos.x + size.x/2, y: pos.y + size.y, z: pos.z + size.z/2 },
+        { x: pos.x - size.x/2, y: pos.y + size.y, z: pos.z + size.z/2 },
+      ];
+
+      const projected = vertices.map(v => project3D(v.x, v.y, v.z, camX, camZ, camAngle));
+
+      const faces = [
+        [0, 1, 2, 3],
+        [4, 5, 6, 7],
+        [0, 1, 5, 4],
+        [2, 3, 7, 6],
+        [0, 3, 7, 4],
+        [1, 2, 6, 5],
+      ];
+
+      const faceColors = [
+        color,
+        adjustBrightness(color, 1.2),
+        adjustBrightness(color, 0.8),
+        adjustBrightness(color, 0.8),
+        adjustBrightness(color, 0.6),
+        adjustBrightness(color, 0.9),
+      ];
+
+      faces.forEach((face, idx) => {
+        ctx.fillStyle = faceColors[idx];
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(projected[face[0]].screenX, projected[face[0]].screenY);
+        for (let i = 1; i < face.length; i++) {
+          ctx.lineTo(projected[face[i]].screenX, projected[face[i]].screenY);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      });
+    };
+
+    const adjustBrightness = (color: string, factor: number) => {
+      const hex = color.replace('#', '');
+      const r = Math.min(255, Math.floor(parseInt(hex.substr(0, 2), 16) * factor));
+      const g = Math.min(255, Math.floor(parseInt(hex.substr(2, 2), 16) * factor));
+      const b = Math.min(255, Math.floor(parseInt(hex.substr(4, 2), 16) * factor));
+      return `rgb(${r},${g},${b})`;
+    };
+
+    const gameLoop = () => {
+      if (!isPaused) {
+        const vehicle = vehicleRef.current;
         const dt = 1 / 60;
         const powerFactor = enginePower[0] / 100;
 
         if (keysPressed.current.has('w') || keysPressed.current.has('arrowup')) {
-          newVehicle.velocity.x += Math.sin(newVehicle.rotation) * 0.5 * powerFactor;
-          newVehicle.velocity.z += Math.cos(newVehicle.rotation) * 0.5 * powerFactor;
+          vehicle.velocity.x -= Math.sin(vehicle.rotation) * 0.5 * powerFactor;
+          vehicle.velocity.z -= Math.cos(vehicle.rotation) * 0.5 * powerFactor;
         }
         if (keysPressed.current.has('s') || keysPressed.current.has('arrowdown')) {
-          newVehicle.velocity.x -= Math.sin(newVehicle.rotation) * 0.3 * powerFactor;
-          newVehicle.velocity.z -= Math.cos(newVehicle.rotation) * 0.3 * powerFactor;
+          vehicle.velocity.x += Math.sin(vehicle.rotation) * 0.3 * powerFactor;
+          vehicle.velocity.z += Math.cos(vehicle.rotation) * 0.3 * powerFactor;
         }
         if (keysPressed.current.has('a') || keysPressed.current.has('arrowleft')) {
-          newVehicle.rotation += 0.05;
-          cameraAngle.current += 0.05;
+          vehicle.rotation += 0.05;
         }
         if (keysPressed.current.has('d') || keysPressed.current.has('arrowright')) {
-          newVehicle.rotation -= 0.05;
-          cameraAngle.current -= 0.05;
+          vehicle.rotation -= 0.05;
         }
 
-        newVehicle.velocity.x *= 0.98;
-        newVehicle.velocity.z *= 0.98;
-        newVehicle.velocity.y -= gravity[0] * dt;
+        vehicle.velocity.x *= 0.98;
+        vehicle.velocity.z *= 0.98;
+        vehicle.velocity.y -= gravity[0] * dt;
 
-        newVehicle.position.x += newVehicle.velocity.x * dt;
-        newVehicle.position.z += newVehicle.velocity.z * dt;
-        newVehicle.position.y += newVehicle.velocity.y * dt;
+        vehicle.position.x += vehicle.velocity.x * dt;
+        vehicle.position.z += vehicle.velocity.z * dt;
+        vehicle.position.y += vehicle.velocity.y * dt;
 
-        if (newVehicle.position.y < 1) {
-          newVehicle.position.y = 1;
-          if (newVehicle.velocity.y < -5) {
-            newVehicle.damage += Math.abs(newVehicle.velocity.y) * 2;
+        if (vehicle.position.y < 1) {
+          vehicle.position.y = 1;
+          if (vehicle.velocity.y < -5) {
+            vehicle.damage += Math.abs(vehicle.velocity.y) * 2;
           }
-          newVehicle.velocity.y = 0;
+          vehicle.velocity.y = 0;
         }
 
         const vehicleSize = { x: 2, y: 1.5, z: 4 };
         obstacles.forEach((obstacle) => {
-          if (checkCollision(newVehicle.position, vehicleSize, obstacle)) {
+          if (checkCollision(vehicle.position, vehicleSize, obstacle)) {
             const collisionSpeed = Math.sqrt(
-              newVehicle.velocity.x ** 2 + newVehicle.velocity.z ** 2
+              vehicle.velocity.x ** 2 + vehicle.velocity.z ** 2
             );
             if (collisionSpeed > 3) {
-              newVehicle.damage += collisionSpeed * 5;
+              vehicle.damage += collisionSpeed * 5;
             }
 
-            const dx = newVehicle.position.x - obstacle.position.x;
-            const dz = newVehicle.position.z - obstacle.position.z;
+            const dx = vehicle.position.x - obstacle.position.x;
+            const dz = vehicle.position.z - obstacle.position.z;
             const distance = Math.sqrt(dx ** 2 + dz ** 2);
-            if (distance > 0) {
-              newVehicle.position.x = obstacle.position.x + (dx / distance) * ((vehicleSize.x + obstacle.size.x) / 2);
-              newVehicle.position.z = obstacle.position.z + (dz / distance) * ((vehicleSize.z + obstacle.size.z) / 2);
+            if (distance > 0.1) {
+              vehicle.position.x = obstacle.position.x + (dx / distance) * ((vehicleSize.x + obstacle.size.x) / 2 + 0.1);
+              vehicle.position.z = obstacle.position.z + (dz / distance) * ((vehicleSize.z + obstacle.size.z) / 2 + 0.1);
             }
 
-            newVehicle.velocity.x *= -0.5;
-            newVehicle.velocity.z *= -0.5;
+            vehicle.velocity.x *= -0.5;
+            vehicle.velocity.z *= -0.5;
           }
         });
 
-        if (newVehicle.damage > 100) newVehicle.damage = 100;
+        if (vehicle.damage > 100) vehicle.damage = 100;
 
-        return newVehicle;
-      });
+        const currentSpeed = Math.sqrt(vehicle.velocity.x ** 2 + vehicle.velocity.z ** 2) * 20;
+        setSpeed(currentSpeed);
+        setDamage(vehicle.damage);
+      }
 
-      const currentSpeed = Math.sqrt(vehicle.velocity.x ** 2 + vehicle.velocity.z ** 2) * 20;
-      setSpeed(currentSpeed);
+      const vehicle = vehicleRef.current;
+      const camX = vehicle.position.x + Math.sin(vehicle.rotation) * 15;
+      const camZ = vehicle.position.z + Math.cos(vehicle.rotation) * 15;
+      const camAngle = vehicle.rotation;
 
-      ctx.fillStyle = '#1A1F2C';
+      const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      gradient.addColorStop(0, '#0A1128');
+      gradient.addColorStop(1, '#1A2F4F');
+      ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      const scale = 10;
-      const centerX = canvas.width / 2;
-      const centerY = canvas.height / 2;
-
-      const drawBox = (pos: Vector3, size: Vector3, color: string, rot: number = 0) => {
-        const screenX = centerX + (pos.x - vehicle.position.x) * scale;
-        const screenY = centerY + (pos.z - vehicle.position.z) * scale - pos.y * scale;
-
-        ctx.save();
-        ctx.translate(screenX, screenY);
-        ctx.rotate(-rot - cameraAngle.current);
-
-        const gradient = ctx.createLinearGradient(-size.x * scale / 2, -size.y * scale / 2, size.x * scale / 2, size.y * scale / 2);
-        gradient.addColorStop(0, color);
-        gradient.addColorStop(1, '#000000');
-
-        ctx.fillStyle = gradient;
-        ctx.fillRect(-size.x * scale / 2, -size.z * scale / 2, size.x * scale, size.z * scale);
-        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(-size.x * scale / 2, -size.z * scale / 2, size.x * scale, size.z * scale);
-        ctx.restore();
-      };
-
-      ctx.fillStyle = '#2A3F5F';
-      ctx.fillRect(0, canvas.height - 100, canvas.width, 100);
-
-      ctx.strokeStyle = '#0EA5E9';
-      ctx.lineWidth = 1;
-      for (let i = -50; i <= 50; i += 5) {
-        const x1 = centerX + (i - vehicle.position.x) * scale;
-        const z1 = centerY + (-50 - vehicle.position.z) * scale;
-        const x2 = centerX + (i - vehicle.position.x) * scale;
-        const z2 = centerY + (50 - vehicle.position.z) * scale;
-        ctx.globalAlpha = 0.2;
-        ctx.beginPath();
-        ctx.moveTo(x1, z1);
-        ctx.lineTo(x2, z2);
-        ctx.stroke();
+      ctx.fillStyle = '#1e3a5f';
+      for (let z = -50; z <= 50; z += 5) {
+        for (let x = -50; x <= 50; x += 5) {
+          const p1 = project3D(x, 0, z, camX, camZ, camAngle);
+          const p2 = project3D(x + 5, 0, z, camX, camZ, camAngle);
+          const p3 = project3D(x + 5, 0, z + 5, camX, camZ, camAngle);
+          const p4 = project3D(x, 0, z + 5, camX, camZ, camAngle);
+          
+          if (p1.perspective > 0 && p2.perspective > 0) {
+            ctx.globalAlpha = 0.3;
+            ctx.strokeStyle = '#0EA5E9';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(p1.screenX, p1.screenY);
+            ctx.lineTo(p2.screenX, p2.screenY);
+            ctx.lineTo(p3.screenX, p3.screenY);
+            ctx.lineTo(p4.screenX, p4.screenY);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+          }
+        }
       }
-
-      for (let i = -50; i <= 50; i += 5) {
-        const x1 = centerX + (-50 - vehicle.position.x) * scale;
-        const z1 = centerY + (i - vehicle.position.z) * scale;
-        const x2 = centerX + (50 - vehicle.position.x) * scale;
-        const z2 = centerY + (i - vehicle.position.z) * scale;
-        ctx.beginPath();
-        ctx.moveTo(x1, z1);
-        ctx.lineTo(x2, z2);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
 
       obstacles.forEach((obstacle) => {
-        let color = '#666666';
-        if (obstacle.type === 'wall') color = '#8B5CF6';
-        if (obstacle.type === 'ramp') color = '#F97316';
-        if (obstacle.type === 'barrier') color = '#EF4444';
-        drawBox(obstacle.position, obstacle.size, color);
+        drawBox3D(obstacle.position, obstacle.size, obstacle.color, camX, camZ, camAngle);
       });
 
       const damageColor = vehicle.damage > 50 ? '#EF4444' : '#0EA5E9';
-      drawBox(vehicle.position, { x: 2, y: 1.5, z: 4 }, damageColor, vehicle.rotation);
+      drawBox3D(vehicle.position, { x: 2, y: 1.5, z: 4 }, damageColor, camX, camZ, camAngle);
 
       animationFrameRef.current = requestAnimationFrame(gameLoop);
     };
@@ -243,17 +284,18 @@ export default function Index() {
       }
       window.removeEventListener('resize', resizeCanvas);
     };
-  }, [vehicle, isPaused, gravity, enginePower]);
+  }, [isPaused, gravity, enginePower]);
 
   const resetVehicle = () => {
-    setVehicle({
+    vehicleRef.current = {
       position: { x: 0, y: 1, z: 0 },
       velocity: { x: 0, y: 0, z: 0 },
       rotation: 0,
       mass: 1500,
       damage: 0,
-    });
+    };
     setSpeed(0);
+    setDamage(0);
   };
 
   return (
@@ -261,32 +303,39 @@ export default function Index() {
       <canvas
         ref={canvasRef}
         className="w-full h-full"
-        style={{ imageRendering: 'crisp-edges' }}
       />
 
       <div className="absolute top-6 left-6 space-y-4">
-        <Card className="bg-black/60 backdrop-blur-sm border-[#0EA5E9]/30 p-4 min-w-[200px]">
-          <div className="space-y-2 text-white font-['Orbitron']">
+        <Card className="bg-black/70 backdrop-blur-md border-[#0EA5E9]/40 p-4 min-w-[200px]">
+          <div className="space-y-2 text-white">
             <div className="flex justify-between items-center">
               <span className="text-sm text-gray-400">СКОРОСТЬ</span>
-              <span className="text-2xl font-bold text-[#0EA5E9]">{speed.toFixed(0)} км/ч</span>
+              <span className="text-2xl font-bold text-[#0EA5E9] font-mono">{speed.toFixed(0)} км/ч</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm text-gray-400">УРОН</span>
-              <span className={`text-2xl font-bold ${vehicle.damage > 50 ? 'text-[#EF4444]' : 'text-[#0EA5E9]'}`}>
-                {vehicle.damage.toFixed(0)}%
+              <span className={`text-2xl font-bold font-mono ${damage > 50 ? 'text-[#EF4444]' : 'text-[#0EA5E9]'}`}>
+                {damage.toFixed(0)}%
               </span>
             </div>
           </div>
         </Card>
 
-        <Card className="bg-black/60 backdrop-blur-sm border-[#0EA5E9]/30 p-3">
+        <Card className="bg-black/70 backdrop-blur-md border-[#0EA5E9]/40 p-3">
           <div className="text-white text-sm space-y-1">
-            <div className="text-gray-400 mb-2">УПРАВЛЕНИЕ</div>
-            <div>W/↑ - Газ</div>
-            <div>S/↓ - Тормоз</div>
-            <div>A/← - Влево</div>
-            <div>D/→ - Вправо</div>
+            <div className="text-gray-400 mb-2 font-semibold">УПРАВЛЕНИЕ</div>
+            <div className="flex items-center gap-2">
+              <span className="text-[#0EA5E9]">W/↑</span> <span className="text-gray-300">Газ</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[#0EA5E9]">S/↓</span> <span className="text-gray-300">Тормоз</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[#0EA5E9]">A/←</span> <span className="text-gray-300">Влево</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[#0EA5E9]">D/→</span> <span className="text-gray-300">Вправо</span>
+            </div>
           </div>
         </Card>
       </div>
@@ -294,7 +343,7 @@ export default function Index() {
       <div className="absolute top-6 right-6 space-y-3">
         <Button
           onClick={() => setIsPaused(!isPaused)}
-          className="w-full bg-[#0EA5E9] hover:bg-[#0EA5E9]/80 text-white"
+          className="w-full bg-[#0EA5E9] hover:bg-[#0EA5E9]/80 text-white shadow-lg"
         >
           <Icon name={isPaused ? 'Play' : 'Pause'} size={20} className="mr-2" />
           {isPaused ? 'Продолжить' : 'Пауза'}
@@ -302,7 +351,7 @@ export default function Index() {
 
         <Button
           onClick={resetVehicle}
-          className="w-full bg-[#F97316] hover:bg-[#F97316]/80 text-white"
+          className="w-full bg-[#F97316] hover:bg-[#F97316]/80 text-white shadow-lg"
         >
           <Icon name="RotateCcw" size={20} className="mr-2" />
           Сброс
@@ -311,7 +360,7 @@ export default function Index() {
         <Button
           onClick={() => setShowSettings(!showSettings)}
           variant="outline"
-          className="w-full bg-black/60 backdrop-blur-sm border-[#0EA5E9]/30 text-white hover:bg-white/10"
+          className="w-full bg-black/70 backdrop-blur-md border-[#0EA5E9]/40 text-white hover:bg-white/10 shadow-lg"
         >
           <Icon name="Settings" size={20} className="mr-2" />
           Настройки
@@ -319,12 +368,12 @@ export default function Index() {
       </div>
 
       {showSettings && (
-        <Card className="absolute bottom-6 right-6 bg-black/80 backdrop-blur-sm border-[#0EA5E9]/30 p-6 w-80">
-          <div className="space-y-4 text-white">
+        <Card className="absolute bottom-6 right-6 bg-black/80 backdrop-blur-md border-[#0EA5E9]/40 p-6 w-80 shadow-2xl">
+          <div className="space-y-5 text-white">
             <div>
               <div className="flex justify-between mb-2">
-                <span className="text-sm">Гравитация</span>
-                <span className="text-sm text-[#0EA5E9]">{gravity[0].toFixed(1)} м/с²</span>
+                <span className="text-sm font-medium">Гравитация</span>
+                <span className="text-sm text-[#0EA5E9] font-mono">{gravity[0].toFixed(1)} м/с²</span>
               </div>
               <Slider
                 value={gravity}
@@ -338,8 +387,8 @@ export default function Index() {
 
             <div>
               <div className="flex justify-between mb-2">
-                <span className="text-sm">Мощность двигателя</span>
-                <span className="text-sm text-[#0EA5E9]">{enginePower[0]}%</span>
+                <span className="text-sm font-medium">Мощность двигателя</span>
+                <span className="text-sm text-[#0EA5E9] font-mono">{enginePower[0]}%</span>
               </div>
               <Slider
                 value={enginePower}
@@ -355,9 +404,9 @@ export default function Index() {
       )}
 
       <div className="absolute bottom-6 left-6">
-        <Card className="bg-black/60 backdrop-blur-sm border-[#0EA5E9]/30 p-4">
-          <h1 className="text-2xl font-bold text-white mb-1 font-['Orbitron']">BEAMNG SIMULATOR</h1>
-          <p className="text-sm text-gray-400">Краш-тест драйв v1.0</p>
+        <Card className="bg-black/70 backdrop-blur-md border-[#0EA5E9]/40 p-4 shadow-xl">
+          <h1 className="text-2xl font-bold text-white mb-1 tracking-wider">BEAMNG SIMULATOR</h1>
+          <p className="text-sm text-gray-400">Краш-тест драйв v2.0</p>
         </Card>
       </div>
     </div>
